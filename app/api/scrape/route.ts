@@ -2,24 +2,19 @@ import { NextResponse } from 'next/server';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
 
+export const maxDuration = 30; 
+
 export async function POST(req: Request) {
   try {
     const { url } = await req.json();
-
-    // 1. Detect if we are running on your laptop or on Vercel
     const isLocal = process.env.NODE_ENV === 'development';
 
-    // 2. Launch with the corrected Chromium settings
     const browser = await puppeteer.launch({
       args: isLocal ? [] : chromium.args,
-      // Fixed: Using a manual object instead of chromium.defaultViewport
+      // We are defining the viewport manually to avoid the "does not exist" error
       defaultViewport: {
         width: 1280,
-        height: 720,
-        deviceScaleFactor: 1,
-        isMobile: false,
-        hasTouch: false,
-        isLandscape: false,
+        height: 720
       },
       executablePath: isLocal 
         ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
@@ -28,10 +23,8 @@ export async function POST(req: Request) {
     });
 
     const page = await browser.newPage();
-    // Reduced timeout to help with Vercel's 10-second limit
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
-    // 3. The "Brain": Extracting only the recipe data
     const recipeData = await page.evaluate(() => {
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
       for (const script of scripts) {
@@ -45,7 +38,7 @@ export async function POST(req: Request) {
             return {
               title: r.name,
               ingredients: r.recipeIngredient,
-              instructions: r.recipeInstructions?.map((step: any) => step.text || step)
+              instructions: r.recipeInstructions?.map((s: any) => s.text || s)
             };
           }
         } catch (e) { continue; }
