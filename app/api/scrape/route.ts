@@ -9,10 +9,18 @@ export async function POST(req: Request) {
     // 1. Detect if we are running on your laptop or on Vercel
     const isLocal = process.env.NODE_ENV === 'development';
 
-    // 2. Launch the "Cloud-Friendly" browser
+    // 2. Launch with the corrected Chromium settings
     const browser = await puppeteer.launch({
       args: isLocal ? [] : chromium.args,
-      defaultViewport: chromium.defaultViewport,
+      // Fixed: Using a manual object instead of chromium.defaultViewport
+      defaultViewport: {
+        width: 1280,
+        height: 720,
+        deviceScaleFactor: 1,
+        isMobile: false,
+        hasTouch: false,
+        isLandscape: false,
+      },
       executablePath: isLocal 
         ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
         : await chromium.executablePath(),
