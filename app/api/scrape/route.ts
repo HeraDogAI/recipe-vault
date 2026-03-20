@@ -6,23 +6,24 @@ export async function POST(req: Request) {
   try {
     const { url } = await req.json();
 
-    // 1. Detect environment
+    // 1. Detect if we are running on your laptop or on Vercel
     const isLocal = process.env.NODE_ENV === 'development';
 
-    // 2. Launch with Cloud-Optimized settings
+    // 2. Launch the "Cloud-Friendly" browser
     const browser = await puppeteer.launch({
       args: isLocal ? [] : chromium.args,
       defaultViewport: chromium.defaultViewport,
       executablePath: isLocal 
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' // Path for Windows
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
         : await chromium.executablePath(),
       headless: true,
     });
 
     const page = await browser.newPage();
+    // Reduced timeout to help with Vercel's 10-second limit
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-    // 3. Extract JSON-LD Recipe Data
+    // 3. The "Brain": Extracting only the recipe data
     const recipeData = await page.evaluate(() => {
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
       for (const script of scripts) {
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
     await browser.close();
 
     if (!recipeData) {
-      return NextResponse.json({ error: "No recipe found on this page." }, { status: 404 });
+      return NextResponse.json({ error: "No recipe found" }, { status: 404 });
     }
 
     return NextResponse.json(recipeData);
