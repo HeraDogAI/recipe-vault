@@ -1,58 +1,58 @@
 import { NextResponse } from 'next/server';
-import puppeteer from 'puppeteer'; 
-import * as cheerio from 'cheerio';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium-min';
 
-export async function POST(request: Request) {
-    let browser;
-    try {
-        const { url } = await request.json();
+export async function POST(req: Request) {
+  try {
+    const { url } = await req.json();
 
-        // 1. Launch a standard browser without the extra plugins
-        browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+    // 1. Determine if we are on Vercel or Local
+    const isLocal = process.env.NODE_ENV === 'development';
 
-        const page = await browser.newPage();
-        
-        // 2. Use a standard User Agent so you look like a normal visitor
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-        
-        // 3. Go to the URL and wait for the content
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        const html = await page.content();
-        const $ = cheerio.load(html);
+    // 2. Point to the correct executable path
+    const browser = await puppeteer.launch({
+      args: isLocal ? [] : chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: isLocal 
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' // Your local Chrome path
+        : await chromium.executablePath(),
+      headless: true,
+    });
 
-        // 4. Extract Data
-        const title = $('h1').first().text().trim() || "Untitled Recipe";
-        let ingredients: string[] = [];
-        let instructions: string[] = [];
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-        // Look for the "Golden Ticket": JSON-LD data
-        const scripts = $('script[type="application/ld+json"]');
-        scripts.each((_, el) => {
-            try {
-                const data = JSON.parse($(el).html() || '');
-                const items = Array.isArray(data) ? data : (data['@graph'] || [data]);
-                const recipeData = items.find((i: any) => 
-                    i['@type'] === 'Recipe' || 
-                    (Array.isArray(i['@type']) && i['@type'].includes('Recipe'))
-                );
-                
-                if (recipeData) {
-                    ingredients = recipeData.recipeIngredient || [];
-                    const steps = recipeData.recipeInstructions || [];
-                    instructions = steps.map((s: any) => typeof s === 'string' ? s : (s.text || s.name || ""));
-                }
-            } catch (e) {}
-        });
+    // 3. Extract the Recipe Data (JSON-LD)
+    const recipeData = await page.evaluate(() => {
+      const jsonLdScripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+      for (const script of jsonLdScripts) {
+        try {
+          const data = JSON.parse(script.textContent || '');
+          const schemas = Array.isArray(data) ? data : [data];
+          const recipe = schemas.find(s => s['@type'] === 'Recipe' || s['@graph']?.some((g: any) => g['@type'] === 'Recipe'));
+          
+          if (recipe) {
+            const r = recipe['@graph'] ? recipe['@graph'].find((g: any) => g['@type'] === 'Recipe') : recipe;
+            return {
+              title: r.name,
+              ingredients: r.recipeIngredient,
+              instructions: r.recipeInstructions?.map((i: any) => i.text || i)
+            };
+          }
+        } catch (e) { continue; }
+      }
+      return null;
+    });
 
-        return NextResponse.json({ title, ingredients, instructions });
+    await browser.close();
 
-    } catch (error: any) {
-        console.error("Scraper Error:", error.message);
-        return NextResponse.json({ error: error.message }, { status: 500 });
-    } finally {
-        if (browser) await browser.close();
+    if (!recipeData) {
+      return NextResponse.json({ error: "Could not find recipe data on this page." }, { status: 404 });
     }
+
+    return NextResponse.json(recipeData);
+  } catch (error: any) {
+    console.error("Scrape Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 }
