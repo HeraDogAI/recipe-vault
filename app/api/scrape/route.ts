@@ -6,37 +6,37 @@ export async function POST(req: Request) {
   try {
     const { url } = await req.json();
 
-    // 1. Determine if we are on Vercel or Local
+    // 1. Detect environment
     const isLocal = process.env.NODE_ENV === 'development';
 
-    // 2. Point to the correct executable path
+    // 2. Launch with Cloud-Optimized settings
     const browser = await puppeteer.launch({
       args: isLocal ? [] : chromium.args,
       defaultViewport: chromium.defaultViewport,
       executablePath: isLocal 
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' // Your local Chrome path
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' // Path for Windows
         : await chromium.executablePath(),
       headless: true,
     });
 
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-    // 3. Extract the Recipe Data (JSON-LD)
+    // 3. Extract JSON-LD Recipe Data
     const recipeData = await page.evaluate(() => {
-      const jsonLdScripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
-      for (const script of jsonLdScripts) {
+      const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+      for (const script of scripts) {
         try {
           const data = JSON.parse(script.textContent || '');
-          const schemas = Array.isArray(data) ? data : [data];
-          const recipe = schemas.find(s => s['@type'] === 'Recipe' || s['@graph']?.some((g: any) => g['@type'] === 'Recipe'));
+          const items = Array.isArray(data) ? data : [data];
+          const recipe = items.find(i => i['@type'] === 'Recipe' || i['@graph']?.some((g: any) => g['@type'] === 'Recipe'));
           
           if (recipe) {
             const r = recipe['@graph'] ? recipe['@graph'].find((g: any) => g['@type'] === 'Recipe') : recipe;
             return {
               title: r.name,
               ingredients: r.recipeIngredient,
-              instructions: r.recipeInstructions?.map((i: any) => i.text || i)
+              instructions: r.recipeInstructions?.map((step: any) => step.text || step)
             };
           }
         } catch (e) { continue; }
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     await browser.close();
 
     if (!recipeData) {
-      return NextResponse.json({ error: "Could not find recipe data on this page." }, { status: 404 });
+      return NextResponse.json({ error: "No recipe found on this page." }, { status: 404 });
     }
 
     return NextResponse.json(recipeData);
