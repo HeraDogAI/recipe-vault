@@ -1,62 +1,92 @@
 import { NextResponse } from 'next/server';
+import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium-min';
 
-export const maxDuration = 30; // 30 seconds is the max for Vercel Hobby
+export const maxDuration = 30; // Matches your vercel.json
 
 export async function POST(req: Request) {
   try {
     const { url } = await req.json();
-    if (!url) return NextResponse.json({ error: "No URL provided" }, { status: 400 });
 
-    const isLocal = process.env.NODE_ENV === 'development';
+    if (!url) {
+      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    }
 
-    // 1. Configure the browser for the Cloud
+    // 1. Launch the "Mini-Browser" (Chromium)
     const browser = await puppeteer.launch({
-      args: isLocal ? [] : [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-      defaultViewport: { width: 1280, height: 720 },
-      executablePath: isLocal 
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
-        : await chromium.executablePath('https://github.com/sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'),
-      headless: true,
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
     
-    // 2. Go to the URL with a 15-second limit
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // Set a User-Agent so websites don't immediately block the "bot"
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
 
-    // 3. Extract the Recipe
+    // Go to the recipe page
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
+
+    // 2. THE EXTRACTION BRAIN
     const recipeData = await page.evaluate(() => {
+      // --- LAYER 1: SEARCH FOR JSON-LD (THE GOLD STANDARD) ---
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
       for (const script of scripts) {
         try {
-          const data = JSON.parse(script.textContent || '');
-          const items = Array.isArray(data) ? data : [data];
-          const recipe = items.find(i => i['@type'] === 'Recipe' || i['@graph']?.some((g: any) => g['@type'] === 'Recipe'));
+          const data = JSON.parse(script.textContent || '{}');
           
+          // JSON-LD can be a single object, an array, or a @graph
+          const findRecipe = (obj: any): any => {
+            if (!obj) return null;
+            if (obj['@type'] === 'Recipe') return obj;
+            if (obj['@graph'] && Array.isArray(obj['@graph'])) return obj['@graph'].find((i: any) => i['@type'] === 'Recipe');
+            if (Array.isArray(obj)) return obj.find((i: any) => i['@type'] === 'Recipe');
+            return null;
+          };
+
+          const recipe = findRecipe(data);
           if (recipe) {
-            const r = recipe['@graph'] ? recipe['@graph'].find((g: any) => g['@type'] === 'Recipe') : recipe;
             return {
-              title: r.name,
-              ingredients: r.recipeIngredient,
-              instructions: r.recipeInstructions?.map((s: any) => s.text || s)
+              title: recipe.name,
+              ingredients: recipe.recipeIngredient || [],
+              instructions: Array.isArray(recipe.recipeInstructions) 
+                ? recipe.recipeInstructions.map((i: any) => i.text || i.name || i) 
+                : [recipe.recipeInstructions],
+              image: Array.isArray(recipe.image) ? recipe.image[0] : (recipe.image?.url || recipe.image)
             };
           }
         } catch (e) { continue; }
       }
-      return null;
+
+      // --- LAYER 2: CSS SELECTOR FALLBACK (FOR OLDER BLOGS) ---
+      const getList = (selectors: string[]) => {
+        for (const selector of selectors) {
+          const elements = Array.from(document.querySelectorAll(selector));
+          if (elements.length > 0) return elements.map(el => (el as HTMLElement).innerText.trim());
+        }
+        return [];
+      };
+
+      return {
+        title: document.title.split('|')[0].split('-')[0].trim(),
+        ingredients: getList(['.wprm-recipe-ingredient', '.recipe-ingredients li', '.ingredients-list li', '[class*="ingredient"] li']),
+        instructions: getList(['.wprm-recipe-instruction', '.recipe-directions li', '.instructions-list li', '[class*="instruction"] li']),
+        image: document.querySelector('meta[property="og:image"]')?.getAttribute('content') || null
+      };
     });
 
     await browser.close();
 
-    if (!recipeData) {
-      return NextResponse.json({ error: "Recipe data not found on page" }, { status: 404 });
+    // 3. CLEAN UP THE DATA
+    if (!recipeData.ingredients.length && !recipeData.instructions.length) {
+      return NextResponse.json({ error: 'Could not find recipe details on this page.' }, { status: 404 });
     }
 
     return NextResponse.json(recipeData);
+
   } catch (error: any) {
-    console.error("Scrape Error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Scrape Error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to scrape recipe' }, { status: 500 });
   }
 }
