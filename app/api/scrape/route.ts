@@ -12,14 +12,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-   // 1. Launch the "Mini-Browser" (Chromium)
+  // 1. Launch the "Mini-Browser" (Chromium)
     const browser = await puppeteer.launch({
       args: chromium.args,
-      // Change the line below to use this manual object:
-      defaultViewport: { width: 1280, height: 720 }, 
-      executablePath: await chromium.executablePath(),
-      // Force 'true' if chromium.headless is acting up
-      headless: chromium.headless === 'shell' ? true : chromium.headless,
+      defaultViewport: { width: 1280, height: 720 },
+      executablePath: await chromium.executablePath() as any,
+      headless: true, // We hardcode this to true so TypeScript doesn't look for chromium.headless
     });
 
     const page = await browser.newPage();
