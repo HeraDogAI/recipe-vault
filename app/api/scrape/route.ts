@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
-// 1. Change this to chromium-min
-import chromium from '@sparticuz/chromium-min'; 
+import chromium from '@sparticuz/chromium-min';
 import puppeteer from 'puppeteer-core';
 
-export const maxDuration = 30;
+export const maxDuration = 30; 
 
 export async function POST(req: Request) {
   try {
     const { url } = await req.json();
-    
-    // 2. The browser needs a remote URL to download the light version on the fly
+
+    if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+
+    // 1. THE STABLE LAUNCH
+    // We point to a specific remote 'pack' that includes all missing libraries (like libnss3)
     const browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+      ],
       defaultViewport: { width: 1280, height: 720 },
       executablePath: await chromium.executablePath(
         `https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar`
@@ -19,24 +27,21 @@ export async function POST(req: Request) {
       headless: true,
     });
 
-
     const page = await browser.newPage();
     
-    // Pretend to be a real browser to avoid "Bot Blockers"
+    // Set a realistic User Agent so recipes don't block you
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // Go to the URL
+    // Go to the page and wait until the recipe is likely loaded
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
 
-    // 2. EXTRACTION LOGIC
+    // 2. THE EXTRACTION BRAIN
     const recipeData = await page.evaluate(() => {
-      // Helper: Search for the "Recipe" schema in JSON-LD
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
       
       for (const script of scripts) {
         try {
           const data = JSON.parse(script.textContent || '{}');
-          
           const findRecipe = (obj: any): any => {
             if (!obj) return null;
             if (obj['@type'] === 'Recipe') return obj;
@@ -59,7 +64,7 @@ export async function POST(req: Request) {
         } catch (e) { continue; }
       }
 
-      // Fallback: If no Schema is found, hunt for common CSS classes
+      // Fallback CSS selectors
       const getList = (selectors: string[]) => {
         for (const selector of selectors) {
           const elements = Array.from(document.querySelectorAll(selector));
@@ -69,18 +74,17 @@ export async function POST(req: Request) {
       };
 
       return {
-        title: document.title.split('|')[0].split('-')[0].trim(),
-        ingredients: getList(['.wprm-recipe-ingredient', '.recipe-ingredients li', '.ingredients-list li', '[class*="ingredient"] li']),
-        instructions: getList(['.wprm-recipe-instruction', '.recipe-directions li', '.instructions-list li', '[class*="instruction"] li']),
+        title: document.title.split('|')[0].trim(),
+        ingredients: getList(['.wprm-recipe-ingredient', '.recipe-ingredients li', '.ingredients-list li']),
+        instructions: getList(['.wprm-recipe-instruction', '.recipe-directions li', '.instructions-list li']),
         image: document.querySelector('meta[property="og:image"]')?.getAttribute('content') || null
       };
     });
 
     await browser.close();
 
-    // 3. VALIDATION
-    if (!recipeData.ingredients.length && !recipeData.instructions.length) {
-      return NextResponse.json({ error: 'Recipe details not found' }, { status: 404 });
+    if (!recipeData.ingredients.length) {
+      return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
     }
 
     return NextResponse.json(recipeData);
