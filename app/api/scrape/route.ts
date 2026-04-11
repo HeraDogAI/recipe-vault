@@ -1,24 +1,24 @@
 import { NextResponse } from 'next/server';
-import chromium from '@sparticuz/chromium';
+// 1. Change this to chromium-min
+import chromium from '@sparticuz/chromium-min'; 
 import puppeteer from 'puppeteer-core';
 
-export const maxDuration = 30; // Vital for Vercel Hobby tier
+export const maxDuration = 30;
 
 export async function POST(req: Request) {
   try {
     const { url } = await req.json();
+    
+    // 2. The browser needs a remote URL to download the light version on the fly
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: { width: 1280, height: 720 },
+      executablePath: await chromium.executablePath(
+        `https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar`
+      ) as any,
+      headless: true,
+    });
 
-    if (!url) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
-    }
-
-    // 1. LAUNCH WITH VERCEL-SPECIFIC STABILITY FLAGS
-   const browser = await puppeteer.launch({
-  args: chromium.args,
-  defaultViewport: { width: 1280, height: 720 },
-  executablePath: await chromium.executablePath() as any,
-  headless: true,
-});
 
     const page = await browser.newPage();
     
