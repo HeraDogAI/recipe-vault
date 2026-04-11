@@ -13,18 +13,12 @@ export async function POST(req: Request) {
     }
 
     // 1. LAUNCH WITH VERCEL-SPECIFIC STABILITY FLAGS
-    const browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process', // Crucial for serverless environments
-      ],
-      defaultViewport: { width: 1280, height: 720 },
-      executablePath: await chromium.executablePath() as any,
-      headless: true,
-    });
+   const browser = await puppeteer.launch({
+  args: chromium.args,
+  defaultViewport: { width: 1280, height: 720 },
+  executablePath: await chromium.executablePath() as any,
+  headless: true,
+});
 
     const page = await browser.newPage();
     
