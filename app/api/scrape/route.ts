@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 
-export const maxDuration = 30; // Matches your vercel.json
+export const maxDuration = 30; // Vital for Vercel Hobby tier
 
 export async function POST(req: Request) {
   try {
@@ -12,31 +12,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-  // 1. Launch the "Mini-Browser" (Chromium)
+    // 1. LAUNCH WITH VERCEL-SPECIFIC STABILITY FLAGS
     const browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process', // Crucial for serverless environments
+      ],
       defaultViewport: { width: 1280, height: 720 },
       executablePath: await chromium.executablePath() as any,
-      headless: true, // We hardcode this to true so TypeScript doesn't look for chromium.headless
+      headless: true,
     });
 
     const page = await browser.newPage();
     
-    // Set a User-Agent so websites don't immediately block the "bot"
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
+    // Pretend to be a real browser to avoid "Bot Blockers"
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // Go to the recipe page
+    // Go to the URL
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
 
-    // 2. THE EXTRACTION BRAIN
+    // 2. EXTRACTION LOGIC
     const recipeData = await page.evaluate(() => {
-      // --- LAYER 1: SEARCH FOR JSON-LD (THE GOLD STANDARD) ---
+      // Helper: Search for the "Recipe" schema in JSON-LD
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+      
       for (const script of scripts) {
         try {
           const data = JSON.parse(script.textContent || '{}');
           
-          // JSON-LD can be a single object, an array, or a @graph
           const findRecipe = (obj: any): any => {
             if (!obj) return null;
             if (obj['@type'] === 'Recipe') return obj;
@@ -59,7 +65,7 @@ export async function POST(req: Request) {
         } catch (e) { continue; }
       }
 
-      // --- LAYER 2: CSS SELECTOR FALLBACK (FOR OLDER BLOGS) ---
+      // Fallback: If no Schema is found, hunt for common CSS classes
       const getList = (selectors: string[]) => {
         for (const selector of selectors) {
           const elements = Array.from(document.querySelectorAll(selector));
@@ -78,15 +84,15 @@ export async function POST(req: Request) {
 
     await browser.close();
 
-    // 3. CLEAN UP THE DATA
+    // 3. VALIDATION
     if (!recipeData.ingredients.length && !recipeData.instructions.length) {
-      return NextResponse.json({ error: 'Could not find recipe details on this page.' }, { status: 404 });
+      return NextResponse.json({ error: 'Recipe details not found' }, { status: 404 });
     }
 
     return NextResponse.json(recipeData);
 
   } catch (error: any) {
-    console.error('Scrape Error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to scrape recipe' }, { status: 500 });
+    console.error('Final Scrape Error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to scrape' }, { status: 500 });
   }
 }
