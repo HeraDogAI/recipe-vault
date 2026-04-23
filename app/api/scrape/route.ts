@@ -2,7 +2,7 @@ import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import { NextResponse } from 'next/server'; // If using App Router
 
-export async function POST(req) { // Modern Next.js App Router syntax
+export async function POST(req: any) { // Modern Next.js App Router syntax
   try {
     // FIX 1: Extract the URL from the POST request
     const { url } = await req.json();
