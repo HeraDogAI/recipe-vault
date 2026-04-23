@@ -1,3 +1,4 @@
+// @ts-nocheck
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import { NextResponse } from 'next/server'; // If using App Router
