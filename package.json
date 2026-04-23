@@ -17,7 +17,7 @@
   "react": "19.2.3",
   "react-dom": "19.2.3"
 },
-  "devDependencies": {
+ "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -26,8 +26,8 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
   "engines": {
-  "node": "22.x"
-}
+    "node": "22.x"
+  }
 }
