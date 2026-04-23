@@ -1,52 +1,46 @@
-import { NextResponse } from 'next/server';
-import chromium from '@sparticuz/chromium-min';
-import puppeteer from 'puppeteer-core';
+import chromium from "@sparticuz/chromium";
+import puppeteer from "puppeteer-core";
+import { NextResponse } from 'next/server'; // If using App Router
 
-export const maxDuration = 30; 
-
-export async function POST(req: Request) {
+export async function POST(req) { // Modern Next.js App Router syntax
   try {
+    // FIX 1: Extract the URL from the POST request
     const { url } = await req.json();
+    
+    if (!url) {
+      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    }
 
-    if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    if (process.env.VERCEL) {
+      process.env.LD_LIBRARY_PATH = `${process.env.LD_LIBRARY_PATH}:/var/task/node_modules/@sparticuz/chromium/bin`;
+    }
 
-    // 1. THE STABLE LAUNCH
-    // We point to a specific remote 'pack' that includes all missing libraries (like libnss3)
     const browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process',
-      ],
-      defaultViewport: { width: 1280, height: 720 },
-      executablePath: await chromium.executablePath(
-        `https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar`
-      ) as any,
-      headless: true,
+      args: [...chromium.args, "--hide-scrollbars", "--disable-web-security"],
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
-    
-    // Set a realistic User Agent so recipes don't block you
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
-    // Go to the page and wait until the recipe is likely loaded
+    // Timeout check: Vercel hobby limits are tight, 25s is good.
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
 
-    // 2. THE EXTRACTION BRAIN
     const recipeData = await page.evaluate(() => {
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
       
       for (const script of scripts) {
         try {
           const data = JSON.parse(script.textContent || '{}');
-          const findRecipe = (obj: any): any => {
+          
+          // FIX 2: Removed ': any' types so the browser doesn't crash
+          const findRecipe = (obj) => {
             if (!obj) return null;
             if (obj['@type'] === 'Recipe') return obj;
-            if (obj['@graph'] && Array.isArray(obj['@graph'])) return obj['@graph'].find((i: any) => i['@type'] === 'Recipe');
-            if (Array.isArray(obj)) return obj.find((i: any) => i['@type'] === 'Recipe');
+            if (obj['@graph'] && Array.isArray(obj['@graph'])) return obj['@graph'].find((i) => i['@type'] === 'Recipe');
+            if (Array.isArray(obj)) return obj.find((i) => i['@type'] === 'Recipe');
             return null;
           };
 
@@ -56,7 +50,7 @@ export async function POST(req: Request) {
               title: recipe.name,
               ingredients: recipe.recipeIngredient || [],
               instructions: Array.isArray(recipe.recipeInstructions) 
-                ? recipe.recipeInstructions.map((i: any) => i.text || i.name || i) 
+                ? recipe.recipeInstructions.map((i) => i.text || i.name || i) 
                 : [recipe.recipeInstructions],
               image: Array.isArray(recipe.image) ? recipe.image[0] : (recipe.image?.url || recipe.image)
             };
@@ -64,11 +58,11 @@ export async function POST(req: Request) {
         } catch (e) { continue; }
       }
 
-      // Fallback CSS selectors
-      const getList = (selectors: string[]) => {
+      // Fallback
+      const getList = (selectors) => {
         for (const selector of selectors) {
           const elements = Array.from(document.querySelectorAll(selector));
-          if (elements.length > 0) return elements.map(el => (el as HTMLElement).innerText.trim());
+          if (elements.length > 0) return elements.map(el => el.innerText.trim());
         }
         return [];
       };
@@ -83,13 +77,13 @@ export async function POST(req: Request) {
 
     await browser.close();
 
-    if (!recipeData.ingredients.length) {
+    if (!recipeData.ingredients || recipeData.ingredients.length === 0) {
       return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
     }
 
     return NextResponse.json(recipeData);
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('Final Scrape Error:', error);
     return NextResponse.json({ error: error.message || 'Failed to scrape' }, { status: 500 });
   }
